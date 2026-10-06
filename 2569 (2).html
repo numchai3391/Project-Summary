@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบรายงานผลการดำเนินงาน (รายงานแบบย่อ) - โรงเรียนแม่จันวิทยาคม</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts: Sarabun -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Sarabun', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            900: '#1e3a8a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        /* Custom scrollbar for horizontal table scrolling */
+        .table-container::-webkit-scrollbar {
+            height: 10px;
+            width: 10px;
+        }
+        .table-container::-webkit-scrollbar-track {
+            background: #f1f5f9; /* slate-100 */
+            border-radius: 8px;
+        }
+        .table-container::-webkit-scrollbar-thumb {
+            background: #cbd5e1; /* slate-300 */
+            border-radius: 8px;
+            border: 2px solid #f1f5f9;
+        }
+        .table-container::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; /* slate-400 */
+        }
+        
+        /* Loading spinner animation */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #2563eb; /* primary-600 */
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Table structural styling for space efficiency */
+        /* Make table cell widths fit content as closely as possible */
+        table {
+            table-layout: auto; /* Allows browser to determine column widths based on content */
+            width: max-content; /* Ensure table stretches if content is wider than container */
+            min-width: 100%;
+        }
+
+        /* Ensure table header stays fixed when scrolling vertically */
+        th {
+            position: sticky;
+            top: 0;
+            background-color: #f8fafc;
+            z-index: 10;
+        }
+
+        /* Utility to force wrapping on very long contiguous text but prefer compact */
+        .content-cell {
+            white-space: normal; /* Allow text to wrap if necessary */
+            word-break: break-word; /* Break long words to avoid blowing up column width */
+            min-width: 80px; /* Sensible minimum width */
+            max-width: 350px; /* Sensible maximum width to prevent a single column taking over */
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans">
+
+    <nav class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 flex items-center gap-3">
+                        <div class="w-11 h-11 flex-shrink-0 drop-shadow-sm flex items-center justify-center bg-white rounded-full">
+                            <img src="https://mwk.ac.th/wp-content/uploads/2023/11/logo-1.png" alt="โลโก้โรงเรียนแม่จันวิทยาคม" class="max-w-full max-h-full object-contain">
+                        </div>
+                        <div>
+                            <h1 class="font-bold text-xl leading-tight text-slate-900 truncate max-w-[250px] sm:max-w-none">ระบบรายงานผลการดำเนินงาน (รายงานแบบย่อ)</h1>
+                            <p class="text-xs text-slate-500 font-medium">ตามแผนปฏิบัติการประจำปี 2569 | โรงเรียนแม่จันวิทยาคม</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <button onclick="fetchData()" class="p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-full transition-colors flex items-center gap-2" title="รีเฟรชข้อมูล">
+                        <i class="ph ph-arrows-clockwise text-xl"></i>
+                        <span class="text-sm font-medium hidden sm:inline">โหลดข้อมูลใหม่</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow max-w-[1800px] w-full mx-auto px-2 sm:px-4 lg:px-8 py-4 flex flex-col gap-4 h-[calc(100vh-7.5rem)]">
+        
+        <!-- Controls Section: Filters and Stats -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 flex-shrink-0">
+            
+            <div class="flex-grow w-full sm:w-auto">
+                <label for="departmentFilter" class="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center">
+                    <i class="ph ph-funnel-simple text-lg mr-1.5 text-primary-600"></i> กรองตามฝ่าย/กลุ่มงาน
+                </label>
+                <div class="relative max-w-md">
+                    <select id="departmentFilter" onchange="applyFilters()" class="block w-full pl-3 pr-10 py-2 text-base border-slate-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 sm:text-sm rounded-lg border bg-slate-50 appearance-none transition-shadow cursor-pointer hover:border-slate-400">
+                        <option value="all">แสดงทุกฝ่าย/กลุ่มงาน (ทั้งหมด)</option>
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                        <i class="ph ph-caret-down font-bold"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-3 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0 hide-scrollbar">
+                <div class="bg-primary-50 border border-primary-100 rounded-lg px-4 py-2 min-w-[120px] flex-shrink-0 flex flex-col justify-center">
+                    <p class="text-[11px] text-primary-600 font-semibold mb-0.5 uppercase tracking-wide">รายการทั้งหมด</p>
+                    <p id="totalCount" class="text-xl font-bold text-primary-900 leading-none">-</p>
+                </div>
+                <div class="bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2 min-w-[120px] flex-shrink-0 flex flex-col justify-center">
+                    <p class="text-[11px] text-emerald-600 font-semibold mb-0.5 uppercase tracking-wide">แสดงผลอยู่</p>
+                    <p id="filteredCount" class="text-xl font-bold text-emerald-900 leading-none">-</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex-grow flex flex-col overflow-hidden relative">
+            
+            <!-- Loading State -->
+            <div id="loadingState" class="absolute inset-0 z-20 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center flex-grow py-20 transition-opacity duration-300">
+                <div class="loader mb-4"></div>
+                <p class="text-slate-600 font-semibold">กำลังเชื่อมต่อฐานข้อมูล...</p>
+            </div>
+
+            <!-- Error State -->
+            <div id="errorState" class="hidden absolute inset-0 z-20 bg-white flex-col items-center justify-center flex-grow py-20 px-4 text-center">
+                <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
+                    <i class="ph ph-warning-circle text-4xl"></i>
+                </div>
+                <h3 class="text-xl font-bold text-slate-900 mb-2">ไม่สามารถโหลดข้อมูลได้</h3>
+                <p id="errorMessage" class="text-slate-500 max-w-lg mb-6">เกิดข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่อีกครั้ง</p>
+                <button onclick="fetchData()" class="px-6 py-2.5 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition-colors shadow-sm flex items-center gap-2">
+                    <i class="ph ph-arrow-counter-clockwise"></i> ลองใหม่อีกครั้ง
+                </button>
+            </div>
+
+            <!-- Empty State -->
+            <div id="emptyState" class="hidden absolute inset-0 z-20 bg-white flex-col items-center justify-center flex-grow py-20">
+                <div class="w-16 h-16 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mb-4 border border-slate-100">
+                    <i class="ph ph-magnifying-glass text-3xl"></i>
+                </div>
+                <p class="text-slate-600 font-medium text-lg">ไม่พบข้อมูล</p>
+                <p class="text-slate-400 text-sm mt-1">ลองเปลี่ยนเงื่อนไขการกรองข้อมูล</p>
+            </div>
+
+            <!-- Actual Table Area (Horizontal Scrollable) -->
+            <div id="tableWrapper" class="hidden flex-grow overflow-auto table-container w-full h-full relative z-10 bg-white">
+                <table class="divide-y divide-slate-200">
+                    <thead id="tableHead" class="shadow-sm sticky top-0 z-20">
+                        <!-- Headers will be generated here -->
+                    </thead>
+                    <tbody id="tableBody" class="bg-white divide-y divide-slate-100">
+                        <!-- Rows will be generated here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="tableFooter" class="hidden border-t border-slate-200 bg-slate-50/80 px-4 py-2 text-xs text-slate-500 flex justify-between items-center z-20 shrink-0">
+                <span class="flex items-center gap-1.5">
+                    <i class="ph ph-arrows-left-right text-slate-400"></i>
+                    เลื่อนซ้าย-ขวา เพื่อดูข้อมูลเพิ่มเติม
+                </span>
+                <span class="hidden sm:inline">อัปเดตข้อมูลอัตโนมัติจาก Google Sheets</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer Section -->
+    <footer class="bg-white border-t border-slate-200 py-3 mt-auto shrink-0 z-50">
+        <div class="max-w-[1800px] mx-auto px-4 flex items-center justify-center gap-2">
+            <i class="ph ph-shield-check text-primary-600 text-xl"></i>
+            <p class="text-[13px] sm:text-sm text-slate-700 font-semibold tracking-wide">
+                ฝ่ายประกันคุณภาพการศึกษา โรงเรียนแม่จันวิทยาคม
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // Configuration
+        const SHEET_ID = '1Uo7favWz4UiFudTYiktGIcjGktrJ-buA2AJZnTspYHY';
+        const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv`;
+        
+        // Columns to exclude based on user request
+        const EXCLUDED_COLUMNS_KEYWORDS = [
+            'ประเภทงบของโครงการ',
+            'รวมงบประมาณทั้งโครงการ',
+            'งบประมาณของกิจกรรม',
+            'จำนวนงบประมาณที่เบิก'
+        ];
+
+        // State variables
+        let rawData = [];
+        let headers = [];
+        let displayColumnIndices = []; // Keep track of which columns to actually render
+        let departmentColumnIndex = -1;
+
+        // DOM Elements
+        const elLoading = document.getElementById('loadingState');
+        const elError = document.getElementById('errorState');
+        const elErrorMessage = document.getElementById('errorMessage');
+        const elEmpty = document.getElementById('emptyState');
+        const elTableWrapper = document.getElementById('tableWrapper');
+        const elTableFooter = document.getElementById('tableFooter');
+        const elTableHead = document.getElementById('tableHead');
+        const elTableBody = document.getElementById('tableBody');
+        const elFilter = document.getElementById('departmentFilter');
+        const elTotalCount = document.getElementById('totalCount');
+        const elFilteredCount = document.getElementById('filteredCount');
+
+        /**
+         * Initialize application
+         */
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchData();
+        });
+
+        // Helper function สำหรับการโหลดข้อมูลผ่าน Promise
+        function parseCSV(url) {
+            return new Promise((resolve, reject) => {
+                Papa.parse(url, {
+                    download: true,
+                    header: false,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        if (results.errors && results.errors.length > 0) {
+                            reject(results.errors[0]);
+                        } else {
+                            resolve(results.data);
+                        }
+                    },
+                    error: function(err) {
+                        reject(err);
+                    }
+                });
+            });
+        }
+
+        async function fetchData() {
+            showLoading();
+            try {
+                // โหลดข้อมูลจากชีตหลักเพียงตัวเดียว
+                const primaryData = await parseCSV(CSV_URL);
+
+                if (primaryData && primaryData.length > 0) {
+                    processData(primaryData);
+                } else {
+                    showError('ไม่พบข้อมูลใน Google Sheet หลัก');
+                }
+            } catch (err) {
+                if(err.message && err.message.includes('CORS') || err.type === 'NetworkError') {
+                     showError('ไม่สามารถเข้าถึงข้อมูลได้ โปรดตรวจสอบว่าได้เผยแพร่ Google Sheet ไปที่เว็บ (Publish to web) เป็นรูปแบบ CSV แล้ว');
+                } else {
+                     showError('เกิดข้อผิดพลาดในการเชื่อมต่อข้อมูล: ' + (err.message || 'กรุณาลองใหม่อีกครั้ง'));
+                }
+                console.error(err);
+            }
+        }
+
+        function processData(data) {
+            // First row is headers
+            headers = data[0].map(h => h ? h.toString().trim() : '');
+            
+            // 2. Process Rows (ยกเลิกการตัดคอลัมน์ท้ายที่ไม่มีชื่อออก เพื่อรักษาคอลัมน์ K ไว้เสมอ)
+            rawData = data.slice(1);
+            // Filter out completely empty rows
+            rawData = rawData.filter(row => row.some(cell => cell !== null && cell !== ''));
+
+            // --- Inject Virtual Column for Budget Disbursement Status ---
+            const sourceColName = 'จำนวนงบประมาณที่เบิก';
+            const insertAfterColName = 'กิจกรรมของโครงการ';
+            const newColName = 'การเบิกงบ';
+            const actionColName = 'รายงานผลการดำเนินงาน';
+            const statusColName = 'สถานะการส่งรายงาน';
+
+            let sourceIndex = -1;
+            let insertIndex = headers.length; // Default to append if target not found
+
+            headers.forEach((h, idx) => {
+                if (h.includes(sourceColName)) sourceIndex = idx;
+                if (h.includes(insertAfterColName)) insertIndex = idx + 1; // Insert right after
+            });
+
+            // If we found the source column, compute the status for each row
+            if (sourceIndex !== -1) {
+                // Insert headers
+                headers.splice(insertIndex, 0, newColName, actionColName, statusColName);
+                
+                // Insert computed data into each row
+                rawData = rawData.map(row => {
+                    let sourceVal = row[sourceIndex];
+                    let numVal = 0;
+                    
+                    if (sourceVal) {
+                        // Remove commas and parse as number
+                        const cleanVal = sourceVal.toString().replace(/,/g, '');
+                        numVal = parseFloat(cleanVal);
+                        if (isNaN(numVal)) numVal = 0;
+                    }
+                    
+                    // Logic: If >= 1 it's "เบิกแล้ว" else "ยังไม่ได้เบิก"
+                    const statusText = numVal >= 1 ? 'เบิกแล้ว' : 'ยังไม่ได้เบิก';
+                    const actionText = numVal >= 1 ? 'ส่งรายงาน' : '';
+                    
+                    // Logic: เช็คสถานะการส่งรายงานจาก "คอลัมน์ K" (Index ที่ 10) เฉพาะที่เบิกงบแล้ว
+                    let reportStatus = '';
+                    if (numVal >= 1) {
+                        // ดึงข้อมูลจากคอลัมน์ K (A=0, B=1, ... K=10) อย่างระมัดระวัง และลบช่องว่างทิ้งป้องกันการพิมพ์ผิด
+                        const columnKValue = (row.length > 10 && row[10]) ? row[10].toString().replace(/\s/g, '') : '';
+                        
+                        if (columnKValue.includes('ส่งแล้ว') || columnKValue.includes('ส่งรายงาน')) {
+                            reportStatus = 'ส่งแล้ว';
+                        } else {
+                            reportStatus = 'ยังไม่ได้ส่ง';
+                        }
+                    }
+
+                    let newRow = [...row];
+                    newRow.splice(insertIndex, 0, statusText, actionText, reportStatus);
+                    return newRow;
+                });
+            }
+
+            // 3. Identify which columns to DISPLAY and which to HIDE based on exclusion list
+            displayColumnIndices = [];
+            headers.forEach((header, index) => {
+                // ข้ามการแสดงผลคอลัมน์ที่ไม่มีชื่อหัวคอลัมน์ (เช่น คอลัมน์ K ที่อาจไม่ได้ใส่หัวข้อไว้ จะได้ไม่แสดงหัวคอลัมน์ว่างๆ ในตาราง)
+                if (!header || header.trim() === '') return;
+
+                const headerLower = header.toLowerCase();
+                // Check if this header matches any of the excluded keywords
+                const shouldExclude = EXCLUDED_COLUMNS_KEYWORDS.some(keyword => 
+                    headerLower.includes(keyword.toLowerCase())
+                );
+                
+                if (!shouldExclude) {
+                    displayColumnIndices.push(index);
+                }
+            });
+
+            // 4. Setup Filters
+            findDepartmentColumn();
+            populateFilter();
+
+            // Update stats
+            elTotalCount.textContent = rawData.length;
+
+            // Render
+            applyFilters();
+            hideLoading();
+        }
+
+        function findDepartmentColumn() {
+            // Try to find the exact column from the headers (even if it's hidden from display)
+            const keywords = ['ฝ่าย', 'กลุ่มงาน', 'หน่วยงาน'];
+            
+            departmentColumnIndex = headers.findIndex(header => {
+                const lowerHeader = header.toLowerCase();
+                return keywords.some(kw => lowerHeader.includes(kw));
+            });
+            
+            // Fallback strategy if we really can't find one by name
+            if(departmentColumnIndex === -1 && headers.length > 2) {
+                // Look for columns that might have categorical data by counting unique values
+                // This is a complex fallback, keeping it simple: just assume it might be index 1 or 2 if name fails
+            }
+        }
+
+        function populateFilter() {
+            elFilter.innerHTML = '<option value="all">แสดงทุกฝ่าย/กลุ่มงาน (ทั้งหมด)</option>';
+            
+            if (departmentColumnIndex === -1) return;
+
+            const departments = new Set();
+            rawData.forEach(row => {
+                const val = row[departmentColumnIndex];
+                if (val && val.trim() !== '') {
+                    departments.add(val.trim());
+                }
+            });
+
+            const sortedDepartments = Array.from(departments).sort((a, b) => a.localeCompare(b, 'th'));
+
+            sortedDepartments.forEach(dept => {
+                const option = document.createElement('option');
+                option.value = dept;
+                option.textContent = dept;
+                elFilter.appendChild(option);
+            });
+        }
+
+        function applyFilters() {
+            const selectedDept = elFilter.value;
+            let filteredData = rawData;
+
+            if (selectedDept !== 'all' && departmentColumnIndex !== -1) {
+                filteredData = rawData.filter(row => {
+                    const val = row[departmentColumnIndex];
+                    return val && val.trim() === selectedDept;
+                });
+            }
+
+            elFilteredCount.textContent = filteredData.length;
+            renderTable(filteredData);
+        }
+
+        function renderTable(data) {
+            // Render Headers (Only columns in displayColumnIndices)
+            let headHTML = '<tr>';
+            
+            // REMOVED: "ลำดับ" (No.) column header
+
+            displayColumnIndices.forEach((colIndex) => {
+                const headerText = headers[colIndex];
+                // Simplify header padding for space efficiency, text-left, small font
+                headHTML += `<th scope="col" class="px-3 py-3 text-left text-[14px] font-bold text-white border-b-2 border-primary-800 border-r border-primary-600/50 last:border-r-0 align-top whitespace-nowrap bg-gradient-to-r from-primary-700 to-primary-600 shadow-sm">${escapeHTML(headerText)}</th>`;
+            });
+            headHTML += '</tr>';
+            elTableHead.innerHTML = headHTML;
+
+            // Check Empty State
+            if (data.length === 0) {
+                elTableWrapper.classList.add('hidden');
+                elTableFooter.classList.add('hidden');
+                elEmpty.classList.remove('hidden');
+                elEmpty.classList.add('flex');
+                return;
+            }
+
+            elEmpty.classList.add('hidden');
+            elEmpty.classList.remove('flex');
+            
+            // Render Body
+            let bodyHTML = '';
+            data.forEach((row, rowIndex) => {
+                const bgClass = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50/30';
+                bodyHTML += `<tr class="hover:bg-blue-50/50 transition-colors ${bgClass}">`;
+                
+                // REMOVED: "ลำดับ" (No.) data cell
+                
+                // Data cells (Only columns in displayColumnIndices)
+                displayColumnIndices.forEach((colIndex) => {
+                    const cellData = row[colIndex] || '';
+                    const isDeptCol = colIndex === departmentColumnIndex;
+                    
+                    let innerContent = escapeHTML(cellData.toString().trim());
+                    
+                    // If cell is empty, display a subtle dash
+                    if(innerContent === '') {
+                        innerContent = '<span class="text-slate-300">-</span>';
+                    }
+
+                    // Special styling for Department badge
+                    if (isDeptCol && innerContent !== '<span class="text-slate-300">-</span>') {
+                        innerContent = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-800 border border-blue-200 whitespace-nowrap">${innerContent}</span>`;
+                    } 
+                    
+                    // Special styling for Budget Disbursement Status
+                    if (headers[colIndex] === 'การเบิกงบ' && innerContent !== '<span class="text-slate-300">-</span>') {
+                        if (innerContent === 'เบิกแล้ว') {
+                            innerContent = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200 whitespace-nowrap shadow-sm"><i class="ph ph-check-circle mr-1 text-sm"></i> ${innerContent}</span>`;
+                        } else if (innerContent === 'ยังไม่ได้เบิก') {
+                            innerContent = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-rose-100 text-rose-800 border border-rose-200 whitespace-nowrap shadow-sm"><i class="ph ph-x-circle mr-1 text-sm"></i> ${innerContent}</span>`;
+                        }
+                    }
+
+                    // Special styling for Report Action Button
+                    if (headers[colIndex] === 'รายงานผลการดำเนินงาน' && innerContent !== '<span class="text-slate-300">-</span>') {
+                        if (innerContent === 'ส่งรายงาน') {
+                            innerContent = `<a href="https://numchai3391.github.io/Project-Report69/" target="_blank" class="inline-flex items-center px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white rounded-md text-[12px] font-medium transition-all shadow-sm hover:shadow whitespace-nowrap group"><i class="ph ph-paper-plane-right mr-1.5 text-sm group-hover:translate-x-0.5 transition-transform"></i>ส่งรายงานแบบย่อ</a>`;
+                        }
+                    }
+
+                    // Special styling for Report Submission Status
+                    if (headers[colIndex] === 'สถานะการส่งรายงาน' && innerContent !== '<span class="text-slate-300">-</span>') {
+                        if (innerContent === 'ส่งแล้ว') {
+                            innerContent = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200 whitespace-nowrap shadow-sm"><i class="ph ph-check-circle mr-1 text-sm"></i> ${innerContent}</span>`;
+                        } else if (innerContent === 'ยังไม่ได้ส่ง') {
+                            innerContent = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-800 border border-amber-200 whitespace-nowrap shadow-sm"><i class="ph ph-warning-circle mr-1 text-sm"></i> ${innerContent}</span>`;
+                        }
+                    }
+
+                    // Add content-cell class to handle wrapping nicely for long text, but keeping it compact
+                    bodyHTML += `<td class="px-3 py-2 text-[13px] text-slate-700 border-b border-slate-100 border-r border-slate-50 last:border-r-0 align-top content-cell">${innerContent}</td>`;
+                });
+                bodyHTML += '</tr>';
+            });
+            elTableBody.innerHTML = bodyHTML;
+            
+            showTable();
+        }
+
+        function showLoading() {
+            elLoading.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+            elLoading.classList.add('flex', 'opacity-100');
+            elError.classList.add('hidden');
+            elError.classList.remove('flex');
+            // Keep table visible under blur if it exists, otherwise hide
+        }
+
+        function hideLoading() {
+            elLoading.classList.remove('opacity-100');
+            elLoading.classList.add('opacity-0', 'pointer-events-none');
+            setTimeout(() => {
+                elLoading.classList.add('hidden');
+                elLoading.classList.remove('flex');
+            }, 300); // Wait for transition
+        }
+
+        function showError(message) {
+            hideLoading();
+            elError.classList.remove('hidden');
+            elError.classList.add('flex');
+            elErrorMessage.textContent = message;
+            elTableWrapper.classList.add('hidden');
+            elTableFooter.classList.add('hidden');
+        }
+
+        function showTable() {
+            elTableWrapper.classList.remove('hidden');
+            elTableFooter.classList.remove('hidden');
+            elTableFooter.classList.add('flex');
+        }
+
+        function escapeHTML(str) {
+            if (!str) return '';
+            return str.replace(/[&<>'"]/g, 
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag] || tag)
+            );
+        }
+    </script>
+</body>
+</html>
